@@ -367,6 +367,10 @@ pub struct ServerPrefs {
     /// What a connection presents first. Empty means none, which the
     /// server only allows on loopback.
     pub token: String,
+    /// Xưởng Dựng Video: whether the switch was turned on for the agent
+    /// once, at the first run. After that it is the person's: off stays
+    /// off.
+    pub agent_on_by_default: bool,
 }
 
 impl Default for ServerPrefs {
@@ -375,6 +379,7 @@ impl Default for ServerPrefs {
             enabled: false,
             listen: DEFAULT_LISTEN.to_owned(),
             token: String::new(),
+            agent_on_by_default: false,
         }
     }
 }

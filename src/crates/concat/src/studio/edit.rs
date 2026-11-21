@@ -605,3 +605,114 @@ impl Studio {
             .set_clips(std::path::PathBuf::from(session.path()), specs);
     }
 }
+
+// ── Xưởng Dựng Video: an agent's edits on the project on screen ──
+
+impl Studio {
+    /// One request from an agent on the project on screen, run here on
+    /// the window's thread as if the person had made the edit: the same
+    /// bookkeeping (autosave, monitor, mix), one Undo step each, and the
+    /// change on the timeline the moment it lands. See `concat_api::Live`.
+    pub(crate) fn agent_call(&mut self, request: concat_api::Request) -> concat_api::Response {
+        use concat_api::{ApiError, Done, ErrorCode, Reply, Request};
+        let refused = |message: String| ApiError::new(ErrorCode::Refused, message);
+        let result: Result<Reply, ApiError> = (|| {
+            let path = match &request {
+                Request::ProjectGet { path }
+                | Request::ProjectDocument { path }
+                | Request::ProjectSave { path, .. }
+                | Request::ProjectSetVideo { path, .. }
+                | Request::EditApply { path, .. }
+                | Request::EditUndo { path }
+                | Request::EditRedo { path } => path.clone(),
+                _ => return Err(refused("not a request on the project on screen".to_owned())),
+            };
+            let on_screen = self
+                .session
+                .as_ref()
+                .is_some_and(|session| same_folder(session.path(), &path));
+            if !on_screen {
+                return Err(ApiError::new(
+                    ErrorCode::NotOpen,
+                    format!("{path} is no longer the project on screen"),
+                ));
+            }
+            // Whatever the person is in the middle of ends first, the way
+            // an edit of their own would end it.
+            self.end_burst();
+            self.flush_commit();
+            self.echo = None;
+            self.last_commit = None;
+            let view = |studio: &Studio| {
+                Reply::View(Box::new(
+                    studio.session.as_ref().expect("checked above").view(),
+                ))
+            };
+            match request {
+                Request::ProjectGet { .. } => Ok(view(self)),
+                Request::ProjectDocument { .. } => Ok(Reply::Document(
+                    self.session.as_ref().expect("checked above").document(),
+                )),
+                Request::ProjectSave { .. } => {
+                    self.save(false);
+                    Ok(Reply::Done(Done {}))
+                }
+                Request::ProjectSetVideo { video, .. } => {
+                    let session = self.session.as_mut().expect("checked above");
+                    let changed = session.set_video(video).map_err(refused)?;
+                    self.after_change();
+                    Ok(Reply::View(Box::new(changed)))
+                }
+                Request::EditApply { command, .. } => {
+                    let words = command_words(&command);
+                    Asked::log(format_args!("edit (agent): {words}"));
+                    let session = self.session.as_mut().expect("checked above");
+                    match session.apply(*command) {
+                        Ok(changed) => {
+                            self.after_change();
+                            Ok(Reply::View(Box::new(changed)))
+                        }
+                        Err(error) => {
+                            log::warn!(
+                                "edit (agent): {words} was asked for and refused: {error}; nothing changed"
+                            );
+                            Err(refused(error))
+                        }
+                    }
+                }
+                Request::EditUndo { .. } => {
+                    self.words = None;
+                    let session = self.session.as_mut().expect("checked above");
+                    if session.can_undo() {
+                        session.undo();
+                        Asked::log(format_args!("edit (agent): Undo"));
+                        self.after_change();
+                    }
+                    Ok(view(self))
+                }
+                Request::EditRedo { .. } => {
+                    self.words = None;
+                    let session = self.session.as_mut().expect("checked above");
+                    if session.can_redo() {
+                        session.redo();
+                        Asked::log(format_args!("edit (agent): Redo"));
+                        self.after_change();
+                    }
+                    Ok(view(self))
+                }
+                _ => unreachable!("filtered above"),
+            }
+        })();
+        result.into()
+    }
+}
+
+/// Whether two spellings name one project folder.
+fn same_folder(a: &str, b: &str) -> bool {
+    let canonical = |path: &str| {
+        std::fs::canonicalize(path)
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| path.to_owned())
+    };
+    a == b || canonical(a) == canonical(b)
+}

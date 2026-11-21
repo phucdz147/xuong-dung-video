@@ -31,6 +31,8 @@
 #[cfg(feature = "schema")]
 mod contract;
 mod job;
+#[cfg(test)]
+mod live_tests;
 pub mod message;
 #[cfg(test)]
 mod project_close_tests;
@@ -252,6 +254,30 @@ pub struct Api {
     book: Arc<job::Book>,
     /// [`VersionInfo::capabilities`], in the order they were added.
     capabilities: Vec<String>,
+    /// The window this API is embedded in, when it lets callers edit the
+    /// project on screen; see [`Live`].
+    live: Option<Arc<dyn Live>>,
+}
+
+/// Xưởng Dựng Video's live mode: the window an [`Api`] is embedded in,
+/// lending callers the project it has on screen instead of refusing it.
+///
+/// A request on that folder is not run on a session of the API's own:
+/// edits, undo, redo, saves and reads go to the window, on its thread,
+/// so the person watches the agent's change land on the timeline and
+/// takes it back with Undo like any other edit. What only renders - an
+/// export, a preview frame, a template - runs here on a snapshot the
+/// window hands over, so the window never waits for a render.
+pub trait Live: Send + Sync {
+    /// Runs `request`, which names the project on screen, in the window.
+    /// Only the project-scoped requests are handed here, and a media
+    /// import arrives already probed, as an `AddMedia` edit.
+    fn call(&self, request: Request) -> Response;
+
+    /// The project on screen as it stands, for a render: its settings and
+    /// its document. `None` when the window has closed it meanwhile.
+    fn snapshot(&self, path: &str)
+    -> Option<(concat_project::DocumentSettings, serde_json::Value)>;
 }
 
 /// A way to stop the jobs of one [`Api`] from any thread, without waiting
@@ -311,7 +337,17 @@ impl Api {
             jobs: Jobs::default(),
             dirs,
             capabilities: CAPABILITIES.iter().map(|name| (*name).to_owned()).collect(),
+            live: None,
         }
+    }
+
+    /// Lends callers the project the window has on screen; see [`Live`].
+    /// Needs the window's register of open projects
+    /// ([`Api::share_open_projects`]), which is how a folder is known to be
+    /// the window's.
+    pub fn share_live(&mut self, live: Arc<dyn Live>) {
+        self.live = Some(live);
+        self.add_capability("live");
     }
 
     /// The directories this API works under.
@@ -435,7 +471,54 @@ impl Api {
     /// it begins reports through the sink from then on.
     pub fn dispatch(&mut self, request: Request) -> Response {
         self.jobs.reap(&self.book);
+        if let Some(live) = self.live.clone()
+            && let Some(path) = project_of(&request)
+            && self.open.holder(path) == Some(Holder::Window)
+        {
+            let path = path.to_owned();
+            return self.run_live(&*live, &path, request).into();
+        }
         self.run(request).into()
+    }
+
+    /// A request on the project on screen; see [`Live`].
+    fn run_live(
+        &mut self,
+        live: &dyn Live,
+        path: &str,
+        request: Request,
+    ) -> Result<Reply, ApiError> {
+        match request {
+            // Already open, in the window: the answer is how it stands.
+            Request::ProjectOpen { path } => reply(live.call(Request::ProjectGet { path })),
+            Request::ProjectClose { .. } => Err(refused(format!(
+                "{path} is the project on screen: it stays open in the window, which closes it"
+            ))),
+            // Probed here, off the window's thread, and added there.
+            Request::MediaImport { path, file } => {
+                let item = media::probe(&file)
+                    .map_err(ApiError::failed)?
+                    .to_new_media();
+                reply(live.call(Request::EditApply {
+                    path,
+                    command: Box::new(Command::AddMedia { item }),
+                }))
+            }
+            // Renders, on a snapshot of the window's edit.
+            request @ (Request::ExportRun { .. }
+            | Request::PreviewFrame { .. }
+            | Request::TemplateSave { .. }) => {
+                let (settings, document) = live.snapshot(path).ok_or_else(|| not_open(path))?;
+                let mirror =
+                    Session::mirror(path, settings, &document).map_err(ApiError::failed)?;
+                let key = key_of(path);
+                self.sessions.insert(key.clone(), mirror);
+                let result = self.run(request);
+                self.sessions.remove(&key);
+                result
+            }
+            request => reply(live.call(request)),
+        }
     }
 
     fn run(&mut self, request: Request) -> Result<Reply, ApiError> {
@@ -1163,6 +1246,35 @@ fn key_of(path: &str) -> String {
     std::fs::canonicalize(path)
         .map(|canonical| canonical.to_string_lossy().into_owned())
         .unwrap_or_else(|_| path.to_owned())
+}
+
+/// The project folder a request is about, when it is about one that must
+/// already be open: what decides whether it goes to the window ([`Live`]).
+fn project_of(request: &Request) -> Option<&str> {
+    match request {
+        Request::ProjectOpen { path }
+        | Request::ProjectClose { path, .. }
+        | Request::ProjectGet { path }
+        | Request::ProjectDocument { path }
+        | Request::ProjectSave { path, .. }
+        | Request::ProjectSetVideo { path, .. }
+        | Request::EditApply { path, .. }
+        | Request::EditUndo { path }
+        | Request::EditRedo { path }
+        | Request::MediaImport { path, .. }
+        | Request::TemplateSave { path, .. }
+        | Request::ExportRun { path, .. }
+        | Request::PreviewFrame { path, .. } => Some(path),
+        _ => None,
+    }
+}
+
+/// A [`Response`] as the result [`Api::run`] is written in.
+fn reply(response: Response) -> Result<Reply, ApiError> {
+    match response {
+        Response::Result(reply) => Ok(reply),
+        Response::Error(error) => Err(error),
+    }
 }
 
 fn not_open(path: &str) -> ApiError {

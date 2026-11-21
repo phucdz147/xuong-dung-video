@@ -193,7 +193,7 @@ pub fn catalogue() -> Vec<Tool> {
         method(
             "project_open",
             "Open a project",
-            "Opens a project folder so it can be read and edited. Opening one already open returns it as it stands, unsaved edits included. Refused when the Concat window has that project open. Returns the project summary.",
+            "Opens a project folder so it can be read and edited. Opening one already open returns it as it stands, unsaved edits included. When the Xưởng Dựng Video window has that project on screen and Automation is on (`concat_version` lists the `live` capability), it opens live: every edit lands on the person's timeline at once, as one Undo step each, and the window saves it; project_close is refused for it. Without Automation it is refused. Returns the project summary.",
             "project.open",
             Summary,
         )

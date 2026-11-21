@@ -164,6 +164,29 @@ impl Session {
         })
     }
 
+    /// A read-only stand-in for a project another owner is editing: the
+    /// window's, as of `document`, its own snapshot. Nothing is read from
+    /// or kept on disk; what renders from it - an export, a preview frame,
+    /// a template - is exactly what that owner had at that moment. Xưởng
+    /// Dựng Video: how an agent exports the project on screen.
+    pub fn mirror(
+        path: &str,
+        settings: DocumentSettings,
+        document: &serde_json::Value,
+    ) -> Result<Session, String> {
+        let editor = Editor::from_document(document)
+            .ok_or_else(|| format!("{path}: the window's document could not be read back"))?;
+        let unread = editor.project().unread_summary();
+        Ok(Session {
+            path: path.to_owned(),
+            settings,
+            editor,
+            upgraded: Vec::new(),
+            retired: Default::default(),
+            unread,
+        })
+    }
+
     /// Opens the project a [`projects::ProjectInfo`] describes.
     pub fn open_info(info: &projects::ProjectInfo) -> Result<Session, String> {
         Session::open(

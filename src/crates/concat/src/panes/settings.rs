@@ -298,6 +298,14 @@ impl SettingsPane {
                 self.download_source = Self::download_source(studio).0;
                 self.download_base = studio.prefs.download_base.clone().unwrap_or_default();
                 Self::apply_download_source(studio);
+                // Xưởng Dựng Video: the agent reaches the window, and the
+                // project on screen, from the first run; the person can
+                // still turn Automation off, and then it stays off.
+                if !studio.prefs.server.agent_on_by_default {
+                    studio.prefs.server.agent_on_by_default = true;
+                    studio.prefs.server.enabled = true;
+                    studio.prefs.save(&studio.host.dirs);
+                }
                 self.apply_server(studio);
                 self.refresh(studio);
             }
@@ -818,6 +826,7 @@ impl SettingsPane {
                     // Where `concat --mcp`, started by an agent, finds this
                     // server rather than opening projects behind its back.
                     discovery: Some(concat_server::discovery::path_in(&dirs.config)),
+                    roots: agent_roots(),
                     ..concat_server::Config::default()
                 };
                 // The window's export slot and its register of open
@@ -827,6 +836,9 @@ impl SettingsPane {
                     let mut api = concat_api::Api::new(events)?;
                     api.share_exporter(exporter);
                     api.share_open_projects(open_projects);
+                    // Xưởng Dựng Video: the project on screen is the
+                    // agent's to edit too, live; see `crate::live`.
+                    api.share_live(std::sync::Arc::new(crate::live::WindowLive));
                     Ok(api)
                 })
             });
@@ -1445,4 +1457,20 @@ mod listen_tests {
         );
         assert_eq!(join_listen("", 9000), "127.0.0.1:9000");
     }
+}
+
+/// Where an agent may write through the window's server: the user's home,
+/// as upstream, and Xưởng Dựng Video's own data folder (`du-lieu`, beside
+/// the app folder the executable sits in) when there is one, which on the
+/// portable install is on another drive than home.
+fn agent_roots() -> Vec<std::path::PathBuf> {
+    let mut roots = concat_server::home_root();
+    if let Some(data) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| Some(exe.parent()?.parent()?.join("du-lieu")))
+        .filter(|data| data.is_dir())
+    {
+        roots.push(data);
+    }
+    roots
 }
