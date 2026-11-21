@@ -36,7 +36,7 @@ use crate::dirs::AppDirs;
 use crate::models;
 
 /// The repository the releases are read from.
-pub const REPO: &str = "jub0t/Concat";
+pub const REPO: &str = "phucdz147/xuong-dung-video";
 
 /// The first release with a Version page: the earliest one a person can
 /// come back from, so the earliest one offered.
@@ -44,7 +44,8 @@ pub const FIRST_SWITCHABLE: Version = Version::new(0, 2, 5);
 
 /// GitHub's list of the repository's releases, newest first. A hundred
 /// covers years of releases at this pace.
-const RELEASES_URL: &str = "https://api.github.com/repos/jub0t/Concat/releases?per_page=100";
+const RELEASES_URL: &str =
+    "https://api.github.com/repos/phucdz147/xuong-dung-video/releases?per_page=100";
 
 /// A release's number: `0.2.5`. A tag carries a `v` in front of it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -902,7 +903,7 @@ mod tests {
         }
         assert_eq!(
             manifest_url("v0.2.6"),
-            "https://github.com/jub0t/Concat/releases/download/v0.2.6/manifest.json"
+            "https://github.com/phucdz147/xuong-dung-video/releases/download/v0.2.6/manifest.json"
         );
     }
 

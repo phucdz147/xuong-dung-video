@@ -1,3 +1,15 @@
+# Xưởng Dựng Video
+
+**Xưởng Dựng Video** là trình dựng video của Phúc, xây trên mã nguồn mở của
+[Concat](https://github.com/jub0t/Concat) (Jareer Abdullah, AGPL-3.0-or-later).
+Đây là bản fork đã đổi tên, logo và giao diện theo
+[chính sách thương hiệu của Concat](TRADEMARK.md); không phải bản Concat chính thức.
+Mã nguồn giữ giấy phép AGPL-3.0-or-later như bản gốc.
+
+Bản Windows được build bởi `.github/workflows/xuong-dung-windows.yml`.
+
+---
+
 <p align="center">
   <img src="https://cdn.jsdelivr.net/gh/jub0t/Concat@main/assets/concat-mark-dark.png" alt="Concat" width="100" />
 </p>
