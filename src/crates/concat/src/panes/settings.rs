@@ -845,8 +845,10 @@ impl SettingsPane {
         match started {
             Ok(server) => studio.host.server = Some(server),
             Err(error) => {
-                studio.prefs.server.enabled = false;
-                studio.prefs.save(&studio.host.dirs);
+                // Xưởng Dựng Video: the switch is left as the person set
+                // it. A second window, whose server cannot take the port the
+                // first one holds, turned Automation off for good here, and
+                // with it the agent's live edits in every later window.
                 self.server_error = error.clone();
                 studio.notify(&error, true);
             }
