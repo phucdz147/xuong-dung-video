@@ -31,6 +31,8 @@ mod ui {
     slint::include_modules!();
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod agent;
 mod batch_volume;
 mod chips;
 mod dock;
@@ -527,6 +529,9 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
         models: Models::new(),
     });
     Shell::install(shell.clone());
+    // Xưởng Dựng Video: the agent's column.
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    agent::install(&app);
 
     // The machine's fonts, for the Text inspector's picker. Read on a
     // worker: on a machine with a few thousand faces it is a moment, and
@@ -3069,6 +3074,9 @@ const EXPORT_PATIENCE: std::time::Duration = std::time::Duration::from_secs(10);
 /// frame and removes its files on the way out; one that does not stop
 /// within [`EXPORT_PATIENCE`] does not keep the quit from quitting.
 fn stop_exports() {
+    // Xưởng Dựng Video: the agent goes with the window.
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    agent::shut_down();
     let mut held = None;
     Shell::with(|shell, _| {
         let mut studio = shell.studio.borrow_mut();

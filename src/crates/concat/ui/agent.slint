@@ -1,0 +1,265 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Xưởng Dựng Video contributors
+
+// Xưởng Dựng Video: the agent, in the window.
+//
+// A column on the right of the workspace: the conversation, a card when
+// the agent asks before a step that needs the person (an export, a
+// change of frame, anything the rules say to ask about), and a field to
+// write in. The agent itself is Claude Code on this machine, started by
+// the window (agent.rs); everything here is what it said and what the
+// person answers.
+
+import { Theme } from "theme/theme.slint";
+import { Glyph, Icon } from "icons.slint";
+import { Button } from "primitives/modal.slint";
+
+/// One line of the conversation.
+export struct AgentLine {
+    /// "you", "agent", "tool", "note" or "error"
+    role: string,
+    text: string,
+}
+
+export global Agent {
+    /// The column is shown.
+    in-out property <bool> open: true;
+    in property <[AgentLine]> lines;
+    /// Bumped on every new line, so the column scrolls to the end.
+    in property <int> revision;
+    /// The agent is working on what it was asked.
+    in property <bool> busy;
+    /// One line under the title: what the agent is doing, or why it is not.
+    in property <string> status;
+    /// A step waiting for the person: what it is.
+    in property <bool> asking;
+    in property <string> ask-title;
+    in property <string> ask-detail;
+
+    callback send(string);
+    callback stop();
+    callback answer(bool);
+    callback restart();
+}
+
+component Bubble inherits Rectangle {
+    in property <AgentLine> line;
+    property <bool> mine: root.line.role == "you";
+    property <bool> quiet: root.line.role == "tool" || root.line.role == "note";
+
+    background: root.mine ? Theme.accent-soft
+        : root.line.role == "error" ? Theme.danger-wash
+        : root.quiet ? transparent
+        : Theme.raised;
+    border-radius: Theme.r;
+
+    VerticalLayout {
+        padding-left: root.quiet ? 2px : 10px;
+        padding-right: root.quiet ? 2px : 10px;
+        padding-top: root.quiet ? 1px : 7px;
+        padding-bottom: root.quiet ? 1px : 7px;
+
+        Text {
+            text: root.line.text;
+            wrap: word-wrap;
+            color: root.quiet ? Theme.fg-muted
+                : root.line.role == "error" ? Theme.danger
+                : Theme.fg;
+            font-size: root.quiet ? Theme.fs-sm : Theme.fs-lg;
+        }
+    }
+}
+
+export component AgentPanel inherits Rectangle {
+    background: Theme.panel;
+    border-radius: Theme.r-lg;
+
+    property <length> overflow: Math.max(0px, column.preferred-height - scroller.height);
+
+    VerticalLayout {
+        padding: 12px;
+        spacing: 8px;
+
+        // The title and what the agent is doing.
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: stretch;
+
+            VerticalLayout {
+                alignment: center;
+                Icon {
+                    glyph: Glyph.sparkle;
+                    size: 14px;
+                    tint: Theme.accent;
+                }
+            }
+
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 1px;
+                Text {
+                    text: "Agent dựng";
+                    color: Theme.fg;
+                    font-size: Theme.fs-xl;
+                    font-weight: Theme.weight-title;
+                }
+                Text {
+                    text: Agent.status;
+                    color: Agent.busy ? Theme.accent : Theme.fg-muted;
+                    font-size: Theme.fs-sm;
+                    overflow: elide;
+                }
+            }
+
+            VerticalLayout {
+                alignment: center;
+                Button {
+                    label: "Chat mới";
+                    ghost: true;
+                    enabled: !Agent.busy;
+                    clicked => { Agent.restart(); }
+                }
+            }
+        }
+
+        Rectangle { height: 1px; background: Theme.line; }
+
+        // The conversation, newest at the bottom.
+        scroller := Rectangle {
+            vertical-stretch: 1;
+            clip: true;
+
+            property <length> offset: 0px;
+            property <length> at: Math.max(-root.overflow, Math.min(0px, self.offset));
+
+            TouchArea {
+                scroll-event(event) => {
+                    parent.offset = parent.at + event.delta-y;
+                    return EventResult.accept;
+                }
+            }
+
+            column := VerticalLayout {
+                y: scroller.at;
+                width: scroller.width;
+                height: self.preferred-height;
+                spacing: 8px;
+
+                if Agent.lines.length == 0: Text {
+                    text: "Gõ yêu cầu bên dưới, ví dụ: \"cắt còn 30 giây\", \"thêm phụ đề\". Mặc định agent làm trên bản nháp để anh duyệt; nói \"sửa trực tiếp\" để agent sửa thẳng project đang mở.";
+                    wrap: word-wrap;
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs;
+                }
+
+                for line in Agent.lines: Bubble {
+                    line: line;
+                }
+            }
+        }
+
+        // A step waiting for the person.
+        if Agent.asking: Rectangle {
+            background: Theme.raised;
+            border-radius: Theme.r;
+            border-width: 1px;
+            border-color: Theme.warn;
+
+            VerticalLayout {
+                padding: 10px;
+                spacing: 6px;
+
+                Text {
+                    text: "Agent xin phép: " + Agent.ask-title;
+                    wrap: word-wrap;
+                    color: Theme.fg;
+                    font-size: Theme.fs-lg;
+                    font-weight: Theme.weight-title;
+                }
+                Text {
+                    text: Agent.ask-detail;
+                    wrap: word-wrap;
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-sm;
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: end;
+                    Button {
+                        label: "Từ chối";
+                        danger: true;
+                        clicked => { Agent.answer(false); }
+                    }
+                    Button {
+                        label: "Duyệt";
+                        primary: true;
+                        clicked => { Agent.answer(true); }
+                    }
+                }
+            }
+        }
+
+        // What to ask next.
+        HorizontalLayout {
+            spacing: 6px;
+
+            Rectangle {
+                horizontal-stretch: 1;
+                min-height: 34px;
+                background: Theme.field;
+                border-radius: Theme.r;
+                border-width: 1px;
+                border-color: input.has-focus ? Theme.accent : Theme.line;
+
+                TouchArea {
+                    mouse-cursor: MouseCursor.text;
+                    clicked => { input.focus(); }
+                }
+
+                input := TextInput {
+                    x: 10px;
+                    width: parent.width - 20px;
+                    y: (parent.height - self.height) / 2;
+                    single-line: true;
+                    color: Theme.fg;
+                    font-size: Theme.fs-lg;
+                    enabled: !Agent.asking;
+                    accepted => {
+                        if (self.text != "" && !Agent.busy) {
+                            Agent.send(self.text);
+                            self.text = "";
+                        }
+                    }
+                }
+
+                if input.text == "": Text {
+                    x: 10px;
+                    y: (parent.height - self.height) / 2;
+                    text: Agent.busy ? "Agent đang làm…" : "Nhắn agent…";
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-lg;
+                }
+            }
+
+            if !Agent.busy: Button {
+                label: "Gửi";
+                primary: true;
+                large: true;
+                enabled: input.text != "";
+                clicked => {
+                    Agent.send(input.text);
+                    input.text = "";
+                }
+            }
+
+            if Agent.busy: Button {
+                label: "Dừng";
+                large: true;
+                clicked => { Agent.stop(); }
+            }
+        }
+    }
+
+    // A new line scrolls the column to its end.
+    changed overflow => { scroller.offset = -root.overflow; }
+}

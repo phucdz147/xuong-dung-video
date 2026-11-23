@@ -5,6 +5,7 @@ import { I18n } from "i18n.slint";
 import { Theme } from "theme/theme.slint";
 import { Glyph, Icon } from "icons.slint";
 import { AddPaneButton, PaneKind } from "workspace/pane-switcher.slint";
+import { Agent } from "agent.slint";
 
 // The custom title bar.
 //
@@ -283,6 +284,15 @@ export component TitleBar inherits Rectangle {
             HeaderIconButton {
                 glyph: Glyph.settings;
                 clicked => { root.open-settings(); }
+            }
+        }
+
+        // Xưởng Dựng Video: shows and hides the agent's column.
+        if !root.minimal && !root.covered: VerticalLayout {
+            alignment: center;
+            HeaderIconButton {
+                glyph: Glyph.sparkle;
+                clicked => { Agent.open = !Agent.open; }
             }
         }
 

@@ -84,6 +84,7 @@ import { CaptionStyles } from "dialogs/captions.slint";
 import { Meters } from "timeline/vu-meter.slint";
 import { MotionPose, MotionTile, MotionTiles } from "inspector/motion-picker.slint";
 import { Workspace } from "workspace/workspace.slint";
+import { Agent, AgentLine, AgentPanel } from "agent.slint";
 import {
     Backdrop,
     BackdropData,
@@ -114,6 +115,8 @@ import {
 import { SpeedRamp } from "inspector/speed-ramp.slint";
 
 export {
+    Agent,
+    AgentLine,
     Curves,
     Fmt,
     Focus,
@@ -805,8 +808,27 @@ export component App inherits Window {
             // nothing is passed to it: it is a box with four seats in it, and
             // the views inside those seats reach the state directly. See
             // editor.slint.
-            if !root.on-start && !root.phone: Workspace {
+            // Xưởng Dựng Video: the agent's column on the right of the
+            // workspace, shown and hidden from the title strip.
+            if !root.on-start && !root.phone: HorizontalLayout {
                 vertical-stretch: 1;
+                spacing: 0px;
+
+                Workspace {
+                    horizontal-stretch: 1;
+                }
+
+                if Agent.open: Rectangle {
+                    width: 360px;
+                    background: Theme.page;
+
+                    AgentPanel {
+                        x: 0px;
+                        y: 8px;
+                        width: parent.width - 8px;
+                        height: parent.height - 16px;
+                    }
+                }
             }
 
             // The phone's editor reads the same global; only the shell round
