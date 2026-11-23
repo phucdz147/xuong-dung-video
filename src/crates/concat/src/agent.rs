@@ -19,6 +19,7 @@
 //! approved without them.
 
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -35,15 +36,26 @@ struct Chat {
     lines: Rc<VecModel<AgentLine>>,
     child: Option<Child>,
     stdin: Option<ChildStdin>,
-    /// The step waiting for the person: the request it answers, and the
-    /// tool's input, handed back unchanged with a yes.
-    pending: Option<(String, Value)>,
+    /// The steps waiting for the person, in the order the agent asked: the
+    /// front one is on the card. Several can come at once when the agent
+    /// runs tools side by side, and each needs its own answer.
+    pending: VecDeque<Ask>,
     /// Which process the events belong to; one from a process already
     /// restarted is dropped.
     generation: u64,
     /// Whether the turn ended with a result, so a process that exits
     /// without one is said to have stopped.
     answered: bool,
+}
+
+/// One step the agent asked about.
+struct Ask {
+    /// The request it answers.
+    id: String,
+    /// The tool's input, handed back unchanged with a yes.
+    input: Value,
+    title: String,
+    detail: String,
 }
 
 thread_local! {
@@ -64,7 +76,7 @@ pub fn install(app: &App) {
             lines,
             child: None,
             stdin: None,
-            pending: None,
+            pending: VecDeque::new(),
             generation: 0,
             answered: true,
         })
@@ -159,9 +171,25 @@ fn write_line(value: &Value) -> Result<(), String> {
 
 /// The person's Duyệt (true) or Từ chối (false) on the waiting step.
 fn answer(allow: bool) {
-    let Some((id, input)) = with_chat(|chat| chat.pending.take()).flatten() else {
+    let Some(ask) = with_chat(|chat| chat.pending.pop_front()).flatten() else {
+        with_agent(|agent| agent.set_asking(false));
         return;
     };
+    reply_to(ask, allow);
+    push(
+        "note",
+        if allow {
+            "✓ Anh đã duyệt"
+        } else {
+            "✕ Anh đã từ chối"
+        },
+    );
+    show_next();
+}
+
+/// Sends the answer to one step.
+fn reply_to(ask: Ask, allow: bool) {
+    let Ask { id, input, .. } = ask;
     let response = if allow {
         json!({ "behavior": "allow", "updatedInput": input })
     } else {
@@ -174,16 +202,34 @@ fn answer(allow: bool) {
     if let Err(why) = write_line(&reply) {
         push("error", &format!("Không gửi được câu trả lời: {why}"));
     }
-    with_agent(|agent| agent.set_asking(false));
-    push(
-        "note",
-        if allow {
-            "✓ Anh đã duyệt"
-        } else {
-            "✕ Anh đã từ chối"
-        },
-    );
-    set_status(true, "Agent đang làm…");
+}
+
+/// Puts the next waiting step on the card, or takes the card down.
+fn show_next() {
+    let next = with_chat(|chat| {
+        chat.pending
+            .front()
+            .map(|ask| (ask.title.clone(), ask.detail.clone(), chat.pending.len()))
+    })
+    .flatten();
+    match next {
+        Some((title, detail, waiting)) => {
+            with_agent(|agent| {
+                agent.set_ask_title(SharedString::from(title));
+                agent.set_ask_detail(SharedString::from(detail));
+                agent.set_asking(true);
+            });
+            if waiting > 1 {
+                set_status(true, &format!("Đang chờ anh duyệt · còn {waiting} bước"));
+            } else {
+                set_status(true, "Đang chờ anh duyệt");
+            }
+        }
+        None => {
+            with_agent(|agent| agent.set_asking(false));
+            set_status(true, "Agent đang làm…");
+        }
+    }
 }
 
 /// Stops the turn in progress; the conversation stays.
@@ -193,8 +239,12 @@ fn stop() {
         "request_id": format!("dung-{}", std::process::id()),
         "request": { "subtype": "interrupt" },
     });
-    if with_chat(|chat| chat.pending.is_some()).unwrap_or(false) {
-        answer(false);
+    let waiting: Vec<Ask> = with_chat(|chat| chat.pending.drain(..).collect()).unwrap_or_default();
+    if !waiting.is_empty() {
+        for ask in waiting {
+            reply_to(ask, false);
+        }
+        with_agent(|agent| agent.set_asking(false));
     }
     let _ = write_line(&interrupt);
     push("note", "Anh đã bảo agent dừng");
@@ -209,7 +259,7 @@ fn restart() {
             let _ = child.kill();
             let _ = child.wait();
         }
-        chat.pending = None;
+        chat.pending.clear();
         chat.answered = true;
         chat.lines.set_vec(Vec::new());
     });
@@ -384,13 +434,21 @@ fn on_event(generation: u64, event: Value) {
             let input = request["input"].clone();
             let title = friendly(name, &input);
             let detail = detail(&input);
-            with_chat(|chat| chat.pending = Some((id, input)));
-            with_agent(|agent| {
-                agent.set_ask_title(SharedString::from(title));
-                agent.set_ask_detail(SharedString::from(detail));
-                agent.set_asking(true);
+            with_chat(|chat| {
+                chat.pending.push_back(Ask {
+                    id,
+                    input,
+                    title,
+                    detail,
+                })
             });
-            set_status(true, "Đang chờ anh duyệt");
+            show_next();
+        }
+        // The agent no longer needs a step it asked about.
+        "control_cancel_request" => {
+            let id = event["request_id"].as_str().unwrap_or("");
+            with_chat(|chat| chat.pending.retain(|ask| ask.id != id));
+            show_next();
         }
         "result" => {
             with_chat(|chat| chat.answered = true);
@@ -413,7 +471,7 @@ fn on_ended(generation: u64) {
         if let Some(mut child) = chat.child.take() {
             let _ = child.wait();
         }
-        chat.pending = None;
+        chat.pending.clear();
         chat.answered
     })
     .unwrap_or(true);

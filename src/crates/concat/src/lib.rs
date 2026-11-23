@@ -767,6 +767,11 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
         }
     });
     app.on_titlebar_close(|| {
+        // Xưởng Dựng Video: as in CapCut, the corner's × on a project goes
+        // back to the projects; only on the launch screen does it quit.
+        if back_to_projects() {
+            return;
+        }
         closing("by the window's close button");
         Shell::with(|shell, app| {
             shell.studio.borrow_mut().save_layout(app.window());
@@ -793,6 +798,11 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     // System-driven close (Alt+F4, taskbar close): the same road out, and
     // refused the same way when the project cannot be saved.
     app.window().on_close_requested(|| {
+        // Xưởng Dựng Video: Alt+F4 and the taskbar's Close go the way the
+        // corner's × does - back to the projects first.
+        if back_to_projects() {
+            return slint::CloseRequestResponse::KeepWindowShown;
+        }
         closing("by the system");
         let saved = std::cell::Cell::new(true);
         Shell::with(|shell, app| {
@@ -3061,6 +3071,26 @@ pub(crate) fn add_pane(state: &mut Studio, kind: PaneKind) {
         return;
     };
     state.dock.split_leaf(&path, kind, side);
+}
+
+/// Xưởng Dựng Video: closes the project on screen and goes back to the
+/// launch screen, as the menu's Close Project does: saved first, and kept
+/// open with the reason shown when the save fails. False when no project
+/// is open, and the close goes on to quit the app.
+fn back_to_projects() -> bool {
+    let mut handled = false;
+    Shell::with(|shell, app| {
+        if shell.studio.borrow().session.is_none() {
+            return;
+        }
+        handled = true;
+        log::info!("close: the window's close on a project goes back to the projects");
+        shell.studio.borrow_mut().save_layout(app.window());
+        let _ = shell.studio.borrow_mut().close_project();
+        shell.studio.borrow_mut().refresh_art();
+        shell.studio.borrow().publish(&app, &shell.models);
+    });
+    handled
 }
 
 /// How long a quit waits for an export it cancelled to stop.
